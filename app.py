@@ -234,7 +234,7 @@ async def add1_handler(message: Message) -> None:
 
     value = extract_value(message.text or "")
     if not value:
-        await message.reply("Use: !add1 https://t.me/your_channel")
+        await message.reply("Use: <code>!add1 https://t.me/your_channel</code>")
         return
 
     set_config("link1", value)
@@ -248,7 +248,7 @@ async def add2_handler(message: Message) -> None:
 
     value = extract_value(message.text or "")
     if not value:
-        await message.reply("Use: !add2 https://t.me/your_channel")
+        await message.reply("Use: <code>!add2 https://t.me/your_channel</code>")
         return
 
     set_config("link2", value)
@@ -262,7 +262,7 @@ async def addmsg_handler(message: Message) -> None:
 
     value = extract_value(message.text or "")
     if not value:
-        await message.reply("Use: !addmsg your start message here")
+        await message.reply("Use: <code>!addmsg your start message here</code>")
         return
 
     set_config("start_message", value)
@@ -276,7 +276,7 @@ async def broadcast_handler(message: Message) -> None:
 
     broadcast_text = extract_value(message.text or "")
     if not broadcast_text:
-        await message.reply("Use: !broadcast your message")
+        await message.reply("Use: <code>!broadcast your message</code>")
         return
 
     user_ids = get_all_user_ids()
@@ -305,11 +305,11 @@ async def help_handler(message: Message) -> None:
 
     await message.reply(
         "Admin commands:\n"
-        "!help\n"
-        "!add1 <link>\n"
-        "!add2 <link>\n"
-        "!addmsg <message>\n"
-        "!broadcast <message>"
+        "<code>!help</code>\n"
+        "<code>!add1 https://t.me/your_channel</code>\n"
+        "<code>!add2 https://t.me/your_channel</code>\n"
+        "<code>!addmsg your start message here</code>\n"
+        "<code>!broadcast your message</code>"
     )
 
 
