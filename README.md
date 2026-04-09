@@ -38,7 +38,12 @@ python app.py
 
 ## Python Version
 
-Use Python `3.11`. This project is pinned with `runtime.txt` for Render compatibility.
+Use Python `3.11.11`.
+
+For Render, the important settings are:
+
+- `.python-version` in repo root
+- `PYTHON_VERSION=3.11.11` in service environment variables
 
 ## Commands
 
