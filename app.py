@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import os
@@ -211,7 +212,7 @@ async def start_handler(message: Message) -> None:
             )
 
     start_message = get_config("start_message")
-    await message.answer(start_message, reply_markup=build_start_keyboard())
+    await message.answer(html.escape(start_message), reply_markup=build_start_keyboard())
 
 
 @dp.message(F.text.regexp(r"^!add1(\s+.+)?$"))
@@ -253,7 +254,17 @@ async def addmsg_handler(message: Message) -> None:
         return
 
     set_config("start_message", value)
-    await message.reply("Start message updated.")
+    saved_message = html.escape(get_config("start_message"))
+    await message.reply(f"Start message updated.\n\nSaved text:\n{saved_message}")
+
+
+@dp.message(F.text.regexp(r"^!showmsg$"))
+async def showmsg_handler(message: Message) -> None:
+    if not is_admin(message):
+        return
+
+    saved_message = html.escape(get_config("start_message"))
+    await message.reply(f"Current start message:\n\n{saved_message}")
 
 
 @dp.message(F.text.regexp(r"^!broadcast(\s+.+)?$"))
@@ -296,6 +307,7 @@ async def help_handler(message: Message) -> None:
         "<code>!add1 https://t.me/your_channel</code>\n"
         "<code>!add2 https://t.me/your_channel</code>\n"
         "<code>!addmsg your start message here</code>\n"
+        "<code>!showmsg</code>\n"
         "<code>!broadcast your message</code>"
     )
 
