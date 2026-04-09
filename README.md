@@ -36,6 +36,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
+## Python Version
+
+Use Python `3.11`. This project is pinned with `runtime.txt` for Render compatibility.
+
 ## Commands
 
 User:
