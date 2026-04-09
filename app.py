@@ -75,7 +75,7 @@ def init_storage() -> None:
         "link1": "https://t.me/example_channel_1",
         "link2": "https://t.me/example_channel_2",
         "start_message": (
-            "Welcome!\n\nNeeche diye gaye buttons se channels join kar lo."
+            "Welcome!\n\nNiche 2 demo channels ka link dia hua h join krke demo dekh lo then buy krne k lie msg kro:-  @xlgr_158\n\nproof channel link - https://t.me/+NY1J78w08-k0Y2U1"
         ),
     }
     config_data = load_json(CONFIG_PATH, defaults.copy())
