@@ -1,7 +1,7 @@
 import asyncio
+import json
 import logging
 import os
-import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -20,7 +20,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "bot_data.db"
+CONFIG_PATH = BASE_DIR / "config.json"
+USERS_PATH = BASE_DIR / "users.json"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
@@ -48,35 +49,27 @@ dp = Dispatcher()
 polling_task: Optional[asyncio.Task] = None
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def write_json(path: Path, data: dict | list) -> None:
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
-def init_db() -> None:
-    with get_connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS config (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                joined_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.commit()
+def load_json(path: Path, default: dict | list) -> dict | list:
+    if not path.exists():
+        write_json(path, default)
+        return default
 
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logger.exception("Invalid JSON in %s, resetting file", path.name)
+        write_json(path, default)
+        return default
+
+
+def init_storage() -> None:
     defaults = {
         "link1": "https://t.me/example_channel_1",
         "link2": "https://t.me/example_channel_2",
@@ -84,36 +77,27 @@ def init_db() -> None:
             "Welcome!\n\nNeeche diye gaye buttons se channels join kar lo."
         ),
     }
+    config_data = load_json(CONFIG_PATH, defaults.copy())
+    updated = False
     for key, value in defaults.items():
-        set_config(key, value, only_if_missing=True)
+        if key not in config_data:
+            config_data[key] = value
+            updated = True
+    if updated:
+        write_json(CONFIG_PATH, config_data)
+
+    load_json(USERS_PATH, [])
 
 
 def get_config(key: str, fallback: str = "") -> str:
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT value FROM config WHERE key = ?",
-            (key,),
-        ).fetchone()
-    return row["value"] if row else fallback
+    config_data = load_json(CONFIG_PATH, {})
+    return str(config_data.get(key, fallback))
 
 
-def set_config(key: str, value: str, only_if_missing: bool = False) -> None:
-    with get_connection() as conn:
-        if only_if_missing:
-            conn.execute(
-                "INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)",
-                (key, value),
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO config (key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (key, value),
-            )
-        conn.commit()
+def set_config(key: str, value: str) -> None:
+    config_data = load_json(CONFIG_PATH, {})
+    config_data[key] = value
+    write_json(CONFIG_PATH, config_data)
 
 
 def upsert_user(message: Message) -> bool:
@@ -121,41 +105,37 @@ def upsert_user(message: Message) -> bool:
     if not user:
         return False
 
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT 1 FROM users WHERE user_id = ?",
-            (user.id,),
-        ).fetchone()
-        conn.execute(
-            """
-            INSERT INTO users (user_id, username, first_name, last_name)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                username = excluded.username,
-                first_name = excluded.first_name,
-                last_name = excluded.last_name
-            """,
-            (
-                user.id,
-                user.username,
-                user.first_name,
-                user.last_name,
-            ),
-        )
-        conn.commit()
-    return existing is None
+    users_data = load_json(USERS_PATH, [])
+    user_id = int(user.id)
+    existing_index = next(
+        (index for index, item in enumerate(users_data) if item["user_id"] == user_id),
+        None,
+    )
+    user_record = {
+        "user_id": user_id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+    }
+
+    if existing_index is None:
+        users_data.append(user_record)
+        write_json(USERS_PATH, users_data)
+        return True
+
+    users_data[existing_index] = user_record
+    write_json(USERS_PATH, users_data)
+    return False
 
 
 def get_all_user_ids() -> list[int]:
-    with get_connection() as conn:
-        rows = conn.execute("SELECT user_id FROM users").fetchall()
-    return [int(row["user_id"]) for row in rows]
+    users_data = load_json(USERS_PATH, [])
+    return [int(item["user_id"]) for item in users_data]
 
 
 def get_user_count() -> int:
-    with get_connection() as conn:
-        row = conn.execute("SELECT COUNT(*) AS total FROM users").fetchone()
-    return int(row["total"]) if row else 0
+    users_data = load_json(USERS_PATH, [])
+    return len(users_data)
 
 
 def extract_value(text: str) -> str:
@@ -200,15 +180,22 @@ async def notify_admin_new_user(message: Message) -> None:
         logger.exception("Failed to send backup info to admin")
 
 
-async def send_database_backup(caption: str) -> None:
-    if not DB_PATH.exists():
-        return
-
+async def send_json_backup(caption: str) -> None:
     try:
-        backup_file = FSInputFile(DB_PATH)
-        await bot.send_document(ADMIN_ID, backup_file, caption=caption)
+        if USERS_PATH.exists():
+            await bot.send_document(
+                ADMIN_ID,
+                FSInputFile(USERS_PATH),
+                caption=caption,
+            )
+        if CONFIG_PATH.exists():
+            await bot.send_document(
+                ADMIN_ID,
+                FSInputFile(CONFIG_PATH),
+                caption="Current config backup.",
+            )
     except Exception:
-        logger.exception("Failed to send database backup to admin")
+        logger.exception("Failed to send JSON backup to admin")
 
 
 @dp.message(CommandStart())
@@ -219,8 +206,8 @@ async def start_handler(message: Message) -> None:
         await notify_admin_new_user(message)
         total_users = get_user_count()
         if total_users % 10 == 0:
-            await send_database_backup(
-                f"Database backup after {total_users} total users."
+            await send_json_backup(
+                f"JSON backup after {total_users} total users."
             )
 
     start_message = get_config("start_message")
@@ -317,7 +304,7 @@ async def help_handler(message: Message) -> None:
 async def lifespan(_: FastAPI):
     global polling_task
 
-    init_db()
+    init_storage()
     polling_task = asyncio.create_task(dp.start_polling(bot))
     logger.info("Bot polling started")
 

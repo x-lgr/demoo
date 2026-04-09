@@ -9,7 +9,7 @@ Simple Telegram bot with:
 - Admin-only `!broadcast`
 - Admin-only `!help`
 - User backup notification in admin chat
-- Automatic SQLite DB backup to admin after every 10 new users
+- Automatic JSON backup to admin after every 10 new users
 - Render-friendly web service with health endpoint
 
 ## Setup
@@ -73,7 +73,8 @@ Admin only:
 
 ## Notes
 
-- Links and start message are stored in `bot_data.db`.
+- Links and start message are stored in `config.json`.
+- Users are stored in `users.json`.
 - Every new user is backed up to the admin chat.
-- Every 10 total users, the full `bot_data.db` file is sent to the admin chat.
-- If Render restarts and local DB clears, admin chat still keeps user backup messages.
+- Every 10 total users, `users.json` and `config.json` are sent to the admin chat.
+- If Render restarts and local files clear, admin chat still keeps backup messages and JSON files.
