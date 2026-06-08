@@ -13,7 +13,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.client.default import DefaultBotProperties
-from fastapi import FastAPI
+from aiogram.types import Update
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
@@ -21,11 +22,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# ⚠️ WARNING: Vercel serverless environment has an ephemeral/read-only filesystem.
+# Files written to BASE_DIR (config.json, users.json) will NOT persist across
+# function invocations. For production persistence, replace file-based storage
+# with a database (e.g. Vercel Postgres, PlanetScale, MongoDB Atlas, Redis).
+# Local file support is kept here for local dev and non-serverless deployments.
 CONFIG_PATH = BASE_DIR / "config.json"
 USERS_PATH = BASE_DIR / "users.json"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").strip()
 PORT = int(os.getenv("PORT", "10000"))
 
 if not BOT_TOKEN:
@@ -33,6 +41,9 @@ if not BOT_TOKEN:
 
 if not ADMIN_ID_RAW:
     raise RuntimeError("ADMIN_ID missing in environment")
+
+if not WEBHOOK_URL:
+    raise RuntimeError("WEBHOOK_URL missing in environment")
 
 ADMIN_ID = int(ADMIN_ID_RAW)
 
@@ -47,8 +58,11 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 dp = Dispatcher()
-polling_task: Optional[asyncio.Task] = None
 
+
+# ---------------------------------------------------------------------------
+# Storage helpers
+# ---------------------------------------------------------------------------
 
 def write_json(path: Path, data: dict | list) -> None:
     path.write_text(
@@ -160,6 +174,10 @@ def build_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+# ---------------------------------------------------------------------------
+# Admin notifications / backups
+# ---------------------------------------------------------------------------
+
 async def notify_admin_new_user(message: Message) -> None:
     user = message.from_user
     if not user:
@@ -198,6 +216,10 @@ async def send_json_backup(caption: str) -> None:
     except Exception:
         logger.exception("Failed to send JSON backup to admin")
 
+
+# ---------------------------------------------------------------------------
+# Bot handlers
+# ---------------------------------------------------------------------------
 
 @dp.message(CommandStart())
 @dp.message(F.text.regexp(r"(?i)^start$"))
@@ -312,29 +334,54 @@ async def help_handler(message: Message) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# FastAPI lifespan: set / delete webhook
+# ---------------------------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global polling_task
-
     init_storage()
-    polling_task = asyncio.create_task(dp.start_polling(bot))
-    logger.info("Bot polling started")
+
+    webhook_path = f"/webhook/{BOT_TOKEN}"
+    full_webhook_url = WEBHOOK_URL.rstrip("/") + webhook_path
+
+    await bot.set_webhook(full_webhook_url)
+    logger.info("Webhook set to %s", full_webhook_url)
 
     try:
         yield
     finally:
-        if polling_task:
-            polling_task.cancel()
-            try:
-                await polling_task
-            except asyncio.CancelledError:
-                pass
+        await bot.delete_webhook()
         await bot.session.close()
-        logger.info("Bot polling stopped")
+        logger.info("Webhook deleted and bot session closed")
 
 
 app = FastAPI(lifespan=lifespan)
 
+
+# ---------------------------------------------------------------------------
+# Webhook endpoint — Telegram sends updates here
+# ---------------------------------------------------------------------------
+
+@app.post("/webhook/{token}")
+async def telegram_webhook(token: str, request: Request) -> JSONResponse:
+    if token != BOT_TOKEN:
+        return JSONResponse({"error": "Unauthorized"}, status_code=403)
+
+    try:
+        data = await request.json()
+        update = Update.model_validate(data)
+        await dp.feed_update(bot=bot, update=update)
+    except Exception:
+        logger.exception("Error processing update")
+
+    # Always return 200 so Telegram doesn't retry
+    return JSONResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Health / root routes
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 async def root() -> JSONResponse:
