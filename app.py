@@ -1,22 +1,18 @@
-import asyncio
-import html
+# vercel_app.py
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from aiogram.client.default import DefaultBotProperties
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -26,7 +22,8 @@ USERS_PATH = BASE_DIR / "users.json"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
-PORT = int(os.getenv("PORT", "10000"))
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").strip()  # Required for Vercel
+VERCEL_URL = os.getenv("VERCEL_URL", "")  # Vercel provides this
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN missing in environment")
@@ -35,6 +32,13 @@ if not ADMIN_ID_RAW:
     raise RuntimeError("ADMIN_ID missing in environment")
 
 ADMIN_ID = int(ADMIN_ID_RAW)
+
+# Use Vercel URL if WEBHOOK_URL not provided
+if not WEBHOOK_URL and VERCEL_URL:
+    WEBHOOK_URL = f"https://{VERCEL_URL}/webhook"
+
+if not WEBHOOK_URL:
+    raise RuntimeError("WEBHOOK_URL missing in environment")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +51,6 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 dp = Dispatcher()
-polling_task: Optional[asyncio.Task] = None
 
 
 def write_json(path: Path, data: dict | list) -> None:
@@ -75,7 +78,7 @@ def init_storage() -> None:
         "link1": "https://t.me/example_channel_1",
         "link2": "https://t.me/example_channel_2",
         "start_message": (
-            "Welcome!\n\nNiche 2 demo channels ka link dia hua h join krke demo dekh lo then buy krne k lie msg kro:-  @xlgr_158\n\nproof channel link - https://t.me/+NY1J78w08-k0Y2U1"
+            "Welcome!\n\nNiche 2 demo channels ka link dia hua h join krke demo dekh lo then buy krne k lie msg kro:-  @fuckuwhorebitch\n\nproof channel link - https://t.me/+NY1J78w08-k0Y2U1"
         ),
     }
     config_data = load_json(CONFIG_PATH, defaults.copy())
@@ -186,13 +189,13 @@ async def send_json_backup(caption: str) -> None:
         if USERS_PATH.exists():
             await bot.send_document(
                 ADMIN_ID,
-                FSInputFile(USERS_PATH),
+                types.FSInputFile(USERS_PATH),
                 caption=caption,
             )
         if CONFIG_PATH.exists():
             await bot.send_document(
                 ADMIN_ID,
-                FSInputFile(CONFIG_PATH),
+                types.FSInputFile(CONFIG_PATH),
                 caption="Current config backup.",
             )
     except Exception:
@@ -200,7 +203,7 @@ async def send_json_backup(caption: str) -> None:
 
 
 @dp.message(CommandStart())
-@dp.message(F.text.regexp(r"(?i)^start$"))
+@dp.message(Command("start"))
 async def start_handler(message: Message) -> None:
     is_new_user = upsert_user(message)
     if is_new_user:
@@ -212,10 +215,10 @@ async def start_handler(message: Message) -> None:
             )
 
     start_message = get_config("start_message")
-    await message.answer(html.escape(start_message), reply_markup=build_start_keyboard())
+    await message.answer(start_message, reply_markup=build_start_keyboard())
 
 
-@dp.message(F.text.regexp(r"^!add1(\s+.+)?$"))
+@dp.message(lambda message: message.text and message.text.startswith("!add1"))
 async def add1_handler(message: Message) -> None:
     if not is_admin(message):
         return
@@ -229,7 +232,7 @@ async def add1_handler(message: Message) -> None:
     await message.reply("Channel 1 link updated.")
 
 
-@dp.message(F.text.regexp(r"^!add2(\s+.+)?$"))
+@dp.message(lambda message: message.text and message.text.startswith("!add2"))
 async def add2_handler(message: Message) -> None:
     if not is_admin(message):
         return
@@ -243,7 +246,7 @@ async def add2_handler(message: Message) -> None:
     await message.reply("Channel 2 link updated.")
 
 
-@dp.message(F.text.regexp(r"^!addmsg(\s+.+)?$"))
+@dp.message(lambda message: message.text and message.text.startswith("!addmsg"))
 async def addmsg_handler(message: Message) -> None:
     if not is_admin(message):
         return
@@ -254,20 +257,20 @@ async def addmsg_handler(message: Message) -> None:
         return
 
     set_config("start_message", value)
-    saved_message = html.escape(get_config("start_message"))
+    saved_message = get_config("start_message")
     await message.reply(f"Start message updated.\n\nSaved text:\n{saved_message}")
 
 
-@dp.message(F.text.regexp(r"^!showmsg$"))
+@dp.message(lambda message: message.text and message.text == "!showmsg")
 async def showmsg_handler(message: Message) -> None:
     if not is_admin(message):
         return
 
-    saved_message = html.escape(get_config("start_message"))
+    saved_message = get_config("start_message")
     await message.reply(f"Current start message:\n\n{saved_message}")
 
 
-@dp.message(F.text.regexp(r"^!broadcast(\s+.+)?$"))
+@dp.message(lambda message: message.text and message.text.startswith("!broadcast"))
 async def broadcast_handler(message: Message) -> None:
     if not is_admin(message):
         return
@@ -296,7 +299,7 @@ async def broadcast_handler(message: Message) -> None:
 
 
 @dp.message(Command("help"))
-@dp.message(F.text.regexp(r"^!help$"))
+@dp.message(lambda message: message.text and message.text == "!help")
 async def help_handler(message: Message) -> None:
     if not is_admin(message):
         return
@@ -312,46 +315,70 @@ async def help_handler(message: Message) -> None:
     )
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    global polling_task
-
+async def on_startup() -> None:
+    """Setup webhook on startup"""
     init_storage()
-    polling_task = asyncio.create_task(dp.start_polling(bot))
-    logger.info("Bot polling started")
-
-    try:
-        yield
-    finally:
-        if polling_task:
-            polling_task.cancel()
-            try:
-                await polling_task
-            except asyncio.CancelledError:
-                pass
-        await bot.session.close()
-        logger.info("Bot polling stopped")
+    await bot.set_webhook(WEBHOOK_URL)
+    logger.info(f"Webhook set to {WEBHOOK_URL}")
 
 
-app = FastAPI(lifespan=lifespan)
+async def on_shutdown() -> None:
+    """Cleanup on shutdown"""
+    await bot.delete_webhook()
+    await bot.session.close()
+    logger.info("Bot shutdown complete")
 
 
-@app.get("/")
-async def root() -> JSONResponse:
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "telegram-channel-link-bot",
-        }
+def create_app() -> web.Application:
+    """Create aiohttp web application"""
+    app = web.Application()
+    
+    # Setup webhook route
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
     )
+    webhook_requests_handler.register(app, path="/webhook")
+    
+    # Setup routes
+    app.router.add_get("/", lambda request: web.json_response({"status": "ok", "service": "telegram-channel-link-bot"}))
+    app.router.add_get("/health", lambda request: web.json_response({"status": "healthy"}))
+    
+    # Register startup/shutdown events
+    app.on_startup.append(lambda _: on_startup())
+    app.on_shutdown.append(lambda _: on_shutdown())
+    
+    return app
 
 
-@app.get("/health")
-async def health() -> JSONResponse:
-    return JSONResponse({"status": "healthy"})
+# For Vercel serverless function
+app = create_app()
 
 
+# Vercel handler
+async def handler(request):
+    """Vercel serverless function handler"""
+    from aiohttp import web
+    
+    # Parse the incoming request
+    if request.method == "POST" and request.url.path == "/api/webhook":
+        # Handle Telegram webhook
+        body = await request.json()
+        update = Update(**body)
+        await dp.feed_update(bot, update)
+        return web.json_response({"ok": True})
+    
+    # Health check or root endpoint
+    if request.method == "GET":
+        if request.url.path == "/" or request.url.path == "/api/":
+            return web.json_response({"status": "ok", "service": "telegram-channel-link-bot"})
+        if request.url.path == "/health" or request.url.path == "/api/health":
+            return web.json_response({"status": "healthy"})
+    
+    return web.json_response({"error": "Not found"}, status=404)
+
+
+# For local development
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run("app:app", host="0.0.0.0", port=PORT)
+    uvicorn.run("vercel_app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
