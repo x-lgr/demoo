@@ -36,9 +36,9 @@ dp = Dispatcher()
 # In-memory storage for Vercel
 users_db = {}
 config_db = {
-    "link1": "https://t.me/example_channel_1",
-    "link2": "https://t.me/example_channel_2",
-    "start_message": "Welcome!\n\nNiche 2 demo channels ka link dia hua h join krke demo dekh lo then buy krne k lie msg kro:- @xlgr_158\n\nproof channel link - https://t.me/+NY1J78w08-k0Y2U1"
+    "link1": "https://t.me/+jSGMUUU4cA1hZGZl",
+    "link2": "https://t.me/+DBLkMK_hnWozZGY1",
+    "start_message": "Welcome!\n\nNiche 2 Demo Channels Ka Link dia Hua H Join \nKrke Demo Dekh Lo then Buy Krne K Lie Msg \nKro:- @fuckuwhorebitch\n\nProof Channel Link - https://t.me/+NY1J78w08-k0Y2U1"
 }
 
 def get_config(key: str, fallback: str = "") -> str:
@@ -94,7 +94,7 @@ async def notify_admin_new_user(message: Message) -> None:
     username = f"@{user.username}" if user.username else "No username"
     full_name = " ".join(filter(None, [user.first_name, user.last_name])).strip()
     text = (
-        f"<b>✅ New User!</b>\n"
+        f"<b>✅ Naya Londa Fas Gaya Hai!</b>\n"
         f"Name: {full_name or 'Unknown'}\n"
         f"Username: {username}\n"
         f"ID: <code>{user.id}</code>\n"
