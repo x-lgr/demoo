@@ -1,11 +1,9 @@
-import asyncio
 import html
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -33,7 +31,6 @@ USERS_PATH = BASE_DIR / "users.json"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").strip()
 PORT = int(os.getenv("PORT", "10000"))
 
 if not BOT_TOKEN:
@@ -41,9 +38,6 @@ if not BOT_TOKEN:
 
 if not ADMIN_ID_RAW:
     raise RuntimeError("ADMIN_ID missing in environment")
-
-if not WEBHOOK_URL:
-    raise RuntimeError("WEBHOOK_URL missing in environment")
 
 ADMIN_ID = int(ADMIN_ID_RAW)
 
@@ -335,25 +329,18 @@ async def help_handler(message: Message) -> None:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI lifespan: set / delete webhook
+# FastAPI lifespan
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_storage()
-
-    webhook_path = f"/webhook/{BOT_TOKEN}"
-    full_webhook_url = WEBHOOK_URL.rstrip("/") + webhook_path
-
-    await bot.set_webhook(full_webhook_url)
-    logger.info("Webhook set to %s", full_webhook_url)
-
+    logger.info("Bot ready — waiting for webhook updates")
     try:
         yield
     finally:
-        await bot.delete_webhook()
         await bot.session.close()
-        logger.info("Webhook deleted and bot session closed")
+        logger.info("Bot session closed")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -375,7 +362,6 @@ async def telegram_webhook(token: str, request: Request) -> JSONResponse:
     except Exception:
         logger.exception("Error processing update")
 
-    # Always return 200 so Telegram doesn't retry
     return JSONResponse({"ok": True})
 
 
@@ -385,12 +371,7 @@ async def telegram_webhook(token: str, request: Request) -> JSONResponse:
 
 @app.get("/")
 async def root() -> JSONResponse:
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "telegram-channel-link-bot",
-        }
-    )
+    return JSONResponse({"status": "ok", "service": "telegram-channel-link-bot"})
 
 
 @app.get("/health")
